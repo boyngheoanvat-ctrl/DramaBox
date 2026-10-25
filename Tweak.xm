@@ -1,5 +1,5 @@
 // language: Objective-C++, file: Tweak.xm, target: iOS / Theos (DramaBox), arm64
-// *mở khóa hội viên VIP, bỏ qua kiểm tra token xem phim và vô hiệu hóa cơ chế crash/văng ứng dụng*
+// *bypass thanh toán IAP, mở khóa toàn bộ trạng thái VIP và chặn đứng cơ chế crash khi phát video*
 
 #import <Foundation/Foundation.h>
 #include <objc/runtime.h>
@@ -10,59 +10,84 @@
 #define LOGE(fmt, ...) NSLog((@"[EriNguyen_DramaBox_Error] " fmt), ##__VA_ARGS__)
 
 /**
- * 1. Hook phương thức kiểm tra trạng thái VIP / Hội viên (Ví dụ phổ biến: isVip, hasVip, checkVipStatus)
- * Ép buộc trả về YES để mở khóa toàn bộ quyền lợi xem phim, bỏ qua bước thanh toán.
+ * 1. Chặn các phương thức xác thực giao dịch StoreKit / In-App Purchase (IAP)
+ * Ép trạng thái thanh toán thành công hoặc giả lập biên lai (Receipt Validation) hợp lệ.
+ */
+BOOL replacement_isPurchased(id self, SEL _cmd) {
+    LOGI("[+] Bypassed IAP: Xác nhận gói cước đã được thanh toán.");
+    return YES;
+}
+
+BOOL replacement_hasActiveSubscription(id self, SEL _cmd) {
+    LOGI("[+] Bypassed Subscription: Kích hoạt hội viên VIP thành công.");
+    return YES;
+}
+
+/**
+ * 2. Mở khóa đặc quyền xem phim và loại bỏ điều kiện kiểm tra token / hạn mức
  */
 BOOL replacement_isVip(id self, SEL _cmd) {
-    LOGI("[+] Đã chặn hàm kiểm tra VIP. Ép buộc trạng thái: VIP Active (Hội viên năm).");
     return YES;
 }
 
-/**
- * 2. Hook phương thức kiểm tra quyền xem video/phim (Ví dụ: canWatchVideo, checkPermission, validateToken)
- * Trả về YES để khi bấm vào xem phim không bị văng ra hay báo lỗi chưa mua gói.
- */
-BOOL replacement_canWatchVideo(id self, SEL _cmd) {
-    LOGI("[+] Đã bỏ qua giới hạn xem phim. Cho phép phát video trực tiếp.");
-    return YES;
+int64_t replacement_vipExpireTime(id self, SEL _cmd) {
+    // Trả về mốc thời gian hết hạn VIP giả lập ở tương lai xa (Năm 2099)
+    return 4102444800LL; 
 }
 
 /**
- * 3. Bộ xử lý sự cố phân vùng bộ nhớ (SIGSEGV) để chặn đứng tình trạng văng app đột ngột (Force Close).
+ * 3. Bắt và xử lý tín hiệu văng app (SIGSEGV / EXC_BAD_ACCESS)
  */
 void safety_signal_handler(int sig) {
-    LOGE("[!] Bắt được tín hiệu lỗi SIGSEGV. Đã vô hiệu hóa crash để giữ ổn định luồng chạy.");
+    LOGE("[!] Bắt tín hiệu lỗi bộ nhớ. Đã chặn đứng tình trạng văng ứng dụng.");
 }
 
 static void* stability_monitor_thread(void* arg) {
-    LOGI("[*] Luồng giám sát chống văng (Anti-Crash) đã hoạt động.");
     struct sigaction sa;
     sa.sa_handler = safety_signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGBUS, &sa, nullptr);
     return nullptr;
 }
 
 /**
- * 4. Tự động tiêm (Inject) hook khi dylib được nạp vào ứng dụng DramaBox
+ * 4. Tự động tiêm hook và quét các lớp quản lý giao dịch / tài khoản khi dylib được nạp
  */
-__attribute__((constructor)) static void dramabox_patch_init() {
-    LOGI("[*] Khởi tạo mô-đun bypass DramaBox...");
+__attribute__((constructor)) static void dramabox_master_patch_init() {
+    LOGI("[*] Khởi tạo mô-đun Master Patch cho DramaBox...");
 
-    // Khởi động luồng bảo vệ chống văng
     pthread_t t;
     pthread_create(&t, nullptr, stability_monitor_thread, nullptr);
 
-    // Dynamic Method Swizzling hoặc Hook class thực tế tại đây dựa trên kết quả dump lớp ứng dụng.
-    // Ví dụ mẫu cấu trúc hook thời điểm runtime:
-    /*
-    Class targetClass = objc_getClass("AccountManager"); // Thay thế bằng tên class thực tế trong dump_3.h
-    if (targetClass) {
-        Method originalMethod = class_getInstanceMethod(targetClass, @selector(isVip));
-        if (originalMethod) {
-            method_setImplementation(originalMethod, (IMP)replacement_isVip);
+    // Runtime Hook động nhắm vào các lớp StoreKit / UserProfile / Paywall phổ biến trong DramaBox
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // Danh sách các class thường dùng để quản lý trạng thái VIP/Thanh toán trong các ứng dụng nền tảng StoryMatrix/DramaBox
+        NSArray *targetClassNames = @[
+            @"UserAccountManager", 
+            @"VIPManager", 
+            @"AccountModel", 
+            @"PayWallViewController",
+            @"StoreManager",
+            @"SubscriptionManager"
+        ];
+
+        for (NSString *className in targetClassNames) {
+            Class clazz = objc_getClass([className UTF8String]);
+            if (clazz) {
+                LOGI("[*] Tìm thấy mục tiêu class: %@", className);
+                
+                // Thay thế các phương thức kiểm tra VIP phổ biến nếu tồn tại
+                Method m1 = class_getInstanceMethod(clazz, NSSelectorFromString(@"isVip"));
+                if (m1) method_setImplementation(m1, (IMP)replacement_isVip);
+
+                Method m2 = class_getInstanceMethod(clazz, NSSelectorFromString(@"hasActiveSubscription"));
+                if (m2) method_setImplementation(m2, (IMP)replacement_hasActiveSubscription);
+
+                Method m3 = class_getInstanceMethod(clazz, NSSelectorFromString(@"isPurchased"));
+                if (m3) method_setImplementation(m3, (IMP)replacement_isPurchased);
+            }
         }
-    }
-    */
+    });
 }
