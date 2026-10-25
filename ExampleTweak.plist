@@ -1,0 +1,8 @@
+// language: xml, file: ExampleTweak.plist, target: Theos build filter
+{
+    Filter = {
+        Bundles = (
+            "com.storymatrix.dramabox"
+        );
+    };
+}
