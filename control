@@ -1,0 +1,9 @@
+Package: com.example.sampletweak
+Name: SampleTweak
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: An example tweak demonstration.
+Maintainer: Developer Name
+Author: Developer Name
+Section: Tweaks
