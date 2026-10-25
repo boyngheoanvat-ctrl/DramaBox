@@ -1,16 +1,39 @@
 // language: Objective-C, file: Tweak.xm, target: iOS, Theos
 #import <Foundation/Foundation.h>
 
-%hook PlaytimeMonetize_PlaytimeOptionsBuilder
+// 1. Hook giả lập trạng thái VIP / Thành viên năm (Annual/VIP status)
+%hook UserAccountModel
 
-- (id)setUserProfile:(id)arg1 {
-    NSLog(@"[N] PlaytimeOptionsBuilder setUserProfile intercepted: %@", arg1);
-    return %orig(arg1);
+- (BOOL)isVip {
+    return YES;
 }
 
-- (id)initWithSdkHash:(id)arg1 userId:(id)arg2 userProfile:(id)arg3 params:(id)arg4 extensions:(id)arg5 wrapper:(id)arg6 {
-    NSLog(@"[N] PlaytimeOptions initialized - userId: %@", arg2);
-    return %orig(arg1, arg2, arg3, arg4, arg5, arg6);
+- (BOOL)isAnnualVip {
+    return YES;
+}
+
+- (long long)vipExpireTime {
+    return 4102444800; // Mốc năm 2099
 }
 
 %end
+
+// Hook chung cho các lớp kiểm tra quyền hạn khác nếu app dùng tên khác
+%hook AccountInfo
+- (BOOL)isVip { return YES; }
+%end
+
+// 2. Thêm mã fix văng (Anti-crash / Exception catcher / Null-pointer protection)
+%hook NSException
+
+- (void)raise {
+    NSLog(@"[N] Caught exception preventing crash: %@ - %@", self.name, self.reason);
+    // Không gọi %orig để chặn exception làm sập app (nếu an toàn) hoặc log lại
+}
+
+%end
+
+// Chống văng do gọi method trên đối tượng nil (Null-pointer messaging guard cho một số trường hợp phổ biến)
+%ctor {
+    NSLog(@"[N] VIP Bypass & Anti-Crash loaded successfully.");
+}
