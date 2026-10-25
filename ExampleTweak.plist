@@ -2,7 +2,7 @@
 {
     Filter = {
         Bundles = (
-            "com.storymatrix.dramabox"
+            "com.storymatrix.drama"
         );
     };
 }
